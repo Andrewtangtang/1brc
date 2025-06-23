@@ -2,7 +2,10 @@
 #include "extraction.h"
 #include <stdbool.h>
 #include <string.h>
-#include <immintrin.h> // avx, avx2, fma, avx-512
+
+#if defined(__x86_64__) || defined(__i386__) || defined(_M_X64) || defined(_M_IX86)
+    #include <immintrin.h> // avx, avx2, fma, avx-512
+#endif
 
 #define SWAP(a, b) a=a^b; b=a^b; a=b^a;
 
@@ -57,6 +60,8 @@ int main(int argc, char** argv) {
         data2[start+10] = ';';
 
         for (uint8_t letter = 0; letter < UINT8_MAX; letter++) {
+#if defined(__x86_64__) || defined(__i386__) || defined(_M_X64) || defined(_M_IX86)
+            // Original x86/x64 implementation
             const __m128i chunk = _mm_lddqu_si128((__m128i*) data2);
 
             if (print) {
@@ -66,6 +71,29 @@ int main(int argc, char** argv) {
 
             uint16_t hash = hash_temperature_using_simd(chunk);
             if (print) printf("HASH: %u => %d\n", hash, value);
+
+#elif defined(__aarch64__) || defined(__arm64__)
+            // ARM64 implementation
+            if (print) {
+                printf("[%.11s|%.5s]\n", data2, &data2[11]);
+                print_bits_128(data2, false);
+            }
+
+            // Use ARM64-specific hash function
+            uint16_t hash = hash_temperature_using_simd_aarch64(data2);
+            if (print) printf("HASH: %u => %d\n", hash, value);
+
+#else
+            // Fallback implementation for other architectures
+            if (print) {
+                printf("[%.11s|%.5s]\n", data2, &data2[11]);
+                print_bits_128(data2, false);
+            }
+
+            // Use fallback hash function
+            uint16_t hash = hash_temperature_using_simd_fallback(data2);
+            if (print) printf("HASH: %u => %d\n", hash, value);
+#endif
 
             {
                 char *end = &data2[15]+1;
