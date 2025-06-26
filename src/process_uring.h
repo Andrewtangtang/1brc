@@ -6,8 +6,8 @@
 #include "defs.h"
 #include "process_common.h"
 #include "uring_file_reader.h"
+#include <fcntl.h>
 #include <sys/mman.h> //mlock
-#include <fcntl.h>    
 
 static void *process_fsegment_uring(void *thread_info) {
   thread_info_t *arg = (thread_info_t *)thread_info;
@@ -20,7 +20,8 @@ static void *process_fsegment_uring(void *thread_info) {
   uint16_t buf_len = 0;
   uint16_t pos = 0;
 
-  ring_file_reader_t reader = rfr_create(arg->fd, arg->start, arg->end, arg->cfg.iopoll);
+  ring_file_reader_t reader =
+      rfr_create(arg->fd, arg->start, arg->end, arg->cfg.iopoll);
 
   record = reader.buf_start + reader.buf_len;
   *(record - 1) =
@@ -98,14 +99,14 @@ static void *process_fsegment_uring(void *thread_info) {
       record = process_record(record, (char *)&buf[pos], &arg->stations);
 
   // After the main uring loop, we need to handle the tail of the file segment
-  // that was not read by O_DIRECT due to alignment constraints. There might also
-  // be a partial record left in the last uring buffer.
+  // that was not read by O_DIRECT due to alignment constraints. There might
+  // also be a partial record left in the last uring buffer.
   const int64_t tail_start = reader.fpos;
   const int64_t tail_len = arg->end - tail_start;
 
   size_t partial_len = 0;
   if (buf) { // Check if the uring loop ran at least once
-      partial_len = (buf + buf_len) - record;
+    partial_len = (buf + buf_len) - record;
   }
 
   if (tail_len > 0 || partial_len > 0) {
@@ -114,7 +115,7 @@ static void *process_fsegment_uring(void *thread_info) {
 
     // Copy the partial part of the record from the last uring buffer, if any.
     if (partial_len > 0) {
-        memcpy(final_buf, record, partial_len);
+      memcpy(final_buf, record, partial_len);
     }
 
     // Read the actual unaligned tail from the file, if any.
@@ -131,10 +132,10 @@ static void *process_fsegment_uring(void *thread_info) {
     char *p = final_buf;
     const size_t final_len = partial_len + tail_len;
     for (size_t i = 0; i < final_len; i++) {
-        if (final_buf[i] == '\n') {
-            record = process_record(p, final_buf + i, &arg->stations);
-            p = final_buf + i + 1;
-        }
+      if (final_buf[i] == '\n') {
+        record = process_record(p, final_buf + i, &arg->stations);
+        p = final_buf + i + 1;
+      }
     }
     free(final_buf);
   }

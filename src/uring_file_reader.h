@@ -6,9 +6,9 @@
 #include "defs.h"
 #include "utils.h"
 
+#include <fcntl.h>
 #include <liburing.h>
 #include <string.h>
-#include <fcntl.h>
 
 typedef struct io_uring io_uring;
 
@@ -32,15 +32,15 @@ typedef struct {
   bool on_hold[RING_ENTRIES]; // true - blocks received out-of-order, on hold
                               // till the expected arives happens when file not
                               // cached. IOSQE_IO_LINK is slow for cached data
-  bool iopoll;               // whether to use IOPOLL mode
+  bool iopoll;                // whether to use IOPOLL mode
 
 #ifdef DEBUG
   size_t stats_out_of_order;
 #endif
 } ring_file_reader_t;
 
-static inline ring_file_reader_t rfr_create(int fd, size_t fstart,
-                                            size_t fend, bool iopoll) {
+static inline ring_file_reader_t rfr_create(int fd, size_t fstart, size_t fend,
+                                            bool iopoll) {
   ring_file_reader_t self = {
       .fend = fend,
       .fpos = fstart,
@@ -75,7 +75,7 @@ static inline ring_file_reader_t rfr_create(int fd, size_t fstart,
   params.flags |= IORING_SETUP_SINGLE_ISSUER;
   // params.flags |= IORING_SETUP_NO_MMAP;  // Not supported on this system
   // params.flags |= IORING_SETUP_SQ_AFF;
-  
+
   if (iopoll) {
     params.flags |= IORING_SETUP_IOPOLL;
   }
