@@ -15,6 +15,9 @@
 #define DISK_CLUSTER 4096
 #define RING_BUFFER_WRAPUP_LEN DISK_CLUSTER
 
+// O_DIRECT alignment requirements
+#define O_DIRECT_ALIGNMENT 512
+
 // 16 gives better results than 64 and 32
 #define STRUCT_ALIGN(x) __attribute__((aligned(x)))
 

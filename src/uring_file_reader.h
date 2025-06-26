@@ -1,11 +1,14 @@
 #ifndef URING_FILE_READER_H
 #define URING_FILE_READER_H
 
+#define _GNU_SOURCE
+
 #include "defs.h"
 #include "utils.h"
 
 #include <liburing.h>
 #include <string.h>
+#include <fcntl.h>
 
 typedef struct io_uring io_uring;
 
@@ -29,6 +32,7 @@ typedef struct {
   bool on_hold[RING_ENTRIES]; // true - blocks received out-of-order, on hold
                               // till the expected arives happens when file not
                               // cached. IOSQE_IO_LINK is slow for cached data
+  bool iopoll;               // whether to use IOPOLL mode
 
 #ifdef DEBUG
   size_t stats_out_of_order;
@@ -36,19 +40,28 @@ typedef struct {
 } ring_file_reader_t;
 
 static inline ring_file_reader_t rfr_create(int fd, size_t fstart,
-                                            size_t fend) {
+                                            size_t fend, bool iopoll) {
   ring_file_reader_t self = {
       .fend = fend,
       .fpos = fstart,
       .buf_len = RING_BUFFER_WRAPUP_LEN + READ_BLOCK_LEN * RING_ENTRIES,
-      .buf_start = (char *)aligned_alloc(ALIGNMENT, self.buf_len),
+      .buf_start = NULL,
       .total_blocks_requested = 0,
       .blocks_in_queue = 0,
       .next_expected_block = 0,
+      .iopoll = iopoll,
 #ifdef DEBUG
       .stats_out_of_order = 0
 #endif
   };
+
+  // Allocate buffer with proper alignment for O_DIRECT if needed
+  if (iopoll) {
+    // For O_DIRECT, we need page-aligned buffers
+    self.buf_start = (char *)aligned_alloc(O_DIRECT_ALIGNMENT, self.buf_len);
+  } else {
+    self.buf_start = (char *)aligned_alloc(ALIGNMENT, self.buf_len);
+  }
 
   memset(self.on_hold, 0, RING_ENTRIES * sizeof(bool));
 
@@ -62,6 +75,10 @@ static inline ring_file_reader_t rfr_create(int fd, size_t fstart,
   params.flags |= IORING_SETUP_SINGLE_ISSUER;
   // params.flags |= IORING_SETUP_NO_MMAP;  // Not supported on this system
   // params.flags |= IORING_SETUP_SQ_AFF;
+  
+  if (iopoll) {
+    params.flags |= IORING_SETUP_IOPOLL;
+  }
 
   int ret = io_uring_queue_init_params(RING_ENTRIES + RING_EXTRA_ENTRIES,
                                        &self.ring, &params);
@@ -103,8 +120,18 @@ static inline bool rfr_request_next_block(ring_file_reader_t *reader) {
 
   char *buf = reader->buf[nr];
 
-  const int64_t to_read = min64(remains, READ_BLOCK_LEN);
-  // const size_t to_read = remains < READ_BLOCK_LEN ? remains : READ_BLOCK_LEN;
+  int64_t to_read = min64(remains, READ_BLOCK_LEN);
+
+  // For O_DIRECT with IOPOLL, verify alignment
+  if (reader->iopoll) {
+    // For O_DIRECT, read size must be a multiple of the alignment.
+    // We read only full blocks and leave the tail for normal read().
+    to_read = (to_read / O_DIRECT_ALIGNMENT) * O_DIRECT_ALIGNMENT;
+
+    if (to_read == 0) {
+      return false; // Not enough data for an aligned read.
+    }
+  }
 
   // io_uring_prep_read(sqe, reader->fd, buf, to_read, reader->fpos);
   io_uring_prep_read(sqe, 0, buf, to_read, reader->fpos);

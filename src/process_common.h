@@ -16,6 +16,7 @@ typedef struct {
   bool mmap;
   bool skip_align;
   bool debug;
+  bool iopoll;
 } config_t;
 
 typedef struct {
