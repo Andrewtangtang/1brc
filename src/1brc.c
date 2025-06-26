@@ -6,6 +6,30 @@
 
 #include <pthread.h>
 #include <fcntl.h>
+#include <sched.h>
+
+// Thread wrapper that sets CPU affinity before calling the processing function
+void* thread_wrapper_with_affinity(void* arg) {
+    thread_info_t *thread_info = (thread_info_t*)arg;
+    
+    if (thread_info->cfg.cpu_affinity) {
+        cpu_set_t cpuset;
+        CPU_ZERO(&cpuset);
+        CPU_SET(thread_info->cpu_core, &cpuset);
+        
+        int ret = pthread_setaffinity_np(pthread_self(), sizeof(cpu_set_t), &cpuset);
+        if (ret != 0) {
+            fprintf(stderr, "Warning: Failed to set CPU affinity for thread on core %d: %s\n", 
+                   thread_info->cpu_core, strerror(ret));
+        }
+    }
+    
+    if (thread_info->cfg.mmap) {
+        return process_fsegment_mmap(arg);
+    } else {
+        return process_fsegment_uring(arg);
+    }
+}
 
 static config_t parse_args(int argc, char *argv[]) {
     if (argc < 2 || argv[1][0] == '-')
@@ -45,6 +69,11 @@ static config_t parse_args(int argc, char *argv[]) {
             continue;
         }
 
+        if (strcmp(argv[i], "--cpu-affinity") == 0) {
+            cfg.cpu_affinity = true;
+            continue;
+        }
+
         goto usage;
     }
 
@@ -60,6 +89,7 @@ usage:
     printf("  --debug      - Output for debugging\n");
     printf("  --skip-align - Skips initial (4096-byte) disk cluster alignment before reads (io_uring only)\n");
     printf("  --iopoll     - Use io_uring with IOPOLL mode (requires O_DIRECT)\n");
+    printf("  --cpu-affinity - Bind threads to specific CPU cores\n");
     printf("\n");
     exit(EXIT_FAILURE);
 }
@@ -116,6 +146,7 @@ int main(int argc, char *argv[]) {
         th_args[i].buf   = mmap_buf;
         th_args[i].fd    = fd;
         th_args[i].cfg   = cfg;
+        th_args[i].cpu_core = i % sysconf(_SC_NPROCESSORS_ONLN);
         strcpy(th_args[i].fname, cfg.fname);
 
         pos = pos_end;
@@ -124,14 +155,8 @@ int main(int argc, char *argv[]) {
     close(scan_fd);
 
     for (int i = 0; i < cfg.cpus; i++) {
-        if (cfg.mmap) {
-            const int ret = pthread_create(&th_args[i].tid, NULL, process_fsegment_mmap, &th_args[i]);
-            ___EXPECT(ret == 0, "thread create");
-        }
-        else {
-            const int ret = pthread_create(&th_args[i].tid, NULL, process_fsegment_uring, &th_args[i]);
-            ___EXPECT(ret == 0, "thread create");
-        }
+        const int ret = pthread_create(&th_args[i].tid, NULL, thread_wrapper_with_affinity, &th_args[i]);
+        ___EXPECT(ret == 0, "thread create");
     }
 
     stations_t merged_stations;
@@ -156,6 +181,7 @@ int main(int argc, char *argv[]) {
         printf("File size: %7.1f MB / %11ld B\n", fsize/1000000.0, fsize);
         printf("Seg. size: %7.1f MB / %11ld B\n", seg_size/1000000.0, seg_size);
         printf("CPUs:      %d\n",                 cfg.cpus);
+        printf("Affinity:  %s\n",                 cfg.cpu_affinity ? "enabled" : "disabled");
         printf("MODE:      %s%s\n",               cfg.mmap ? "mmap" : "io_uring", 
             #ifdef SAFE
                " (SAFE)"
