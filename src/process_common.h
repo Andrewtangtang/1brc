@@ -10,16 +10,21 @@
 #include <immintrin.h>
 #endif
 
+#include <pthread.h> // For pthread_t
+
 typedef struct {
   const char *fname;
   int cpus;
   bool mmap;
   bool skip_align;
   bool debug;
+  bool iopoll;
+  bool cpu_affinity;
 } config_t;
 
 typedef struct {
   pthread_t tid;
+  int cpu_core;
   stations_t stations;
   char fname[255];
   int fd;
