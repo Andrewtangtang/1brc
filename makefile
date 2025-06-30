@@ -1,9 +1,11 @@
 CCG = gcc
 CCC = clang
 
-CFLAGS = -march=skylake -march=native -mtune=native -funroll-loops -flto -ffast-math -fomit-frame-pointer -Wall -Wextra -Isrc 
-# CFLAGS = -march=native -mtune=native -Wall -Wextra -Isrc 
+# Support for custom liburing installation
+LIBURING_PREFIX ?= $(HOME)
 
+CFLAGS = -march=native -mtune=native -funroll-loops -flto -ffast-math -fomit-frame-pointer -Wall -Wextra -Isrc -I$(LIBURING_PREFIX)/include
+LDFLAGS = -L$(LIBURING_PREFIX)/lib -Wl,-rpath=$(LIBURING_PREFIX)/lib
 LIBS = -luring
 
 RELEASE_FLAGS       = -Ofast -DNDEBUG -DRELEASE
@@ -19,7 +21,20 @@ DEP := bin/deps
 
 DEP_FLAGS = -MT $@ -MMD -MP -MF $(DEP)/$*.d
 
-all:               | $(BIN) $(DEP) debug release release-safe release-debug debug-gcc release-gcc release-debug-gcc gen gen-debug
+ARCH := $(shell uname -m)
+
+# mappings_gen requires x86/x64 SIMD instructions, so only build on those architectures
+ifeq ($(ARCH),x86_64)
+    GEN_TARGETS = gen gen-debug
+else ifeq ($(ARCH),i386)
+    GEN_TARGETS = gen gen-debug
+else
+    # Skip mappings_gen on ARM64 and other architectures for now
+    # TODO: Implement ARM NEON version when needed
+    GEN_TARGETS = 
+endif
+
+all:               | $(BIN) $(DEP) debug release release-safe release-debug debug-gcc release-gcc release-debug-gcc $(GEN_TARGETS)
 
 release:           | $(BIN) $(DEP) $(APP:%=$(BIN)/%)
 release-safe:      | $(BIN) $(DEP) $(APP:%=$(BIN)/%_safe)
@@ -46,32 +61,32 @@ clean:
 # CLANG
 
 $(BIN)/%: $(SRC)/%.c
-	$(CCC) $< -o $@ $(CFLAGS) $(RELEASE_FLAGS) $(DEP_FLAGS) $(LIBS)
+	$(CCC) $< -o $@ $(CFLAGS) $(RELEASE_FLAGS) $(DEP_FLAGS) $(LDFLAGS) $(LIBS)
 
 $(BIN)/%_safe: $(SRC)/%.c
-	$(CCC) $< -o $@ $(CFLAGS) $(RELEASE_SAFE_FLAGS) $(DEP_FLAGS) $(LIBS)
+	$(CCC) $< -o $@ $(CFLAGS) $(RELEASE_SAFE_FLAGS) $(DEP_FLAGS) $(LDFLAGS) $(LIBS)
 
 $(BIN)/%_rdebug: $(SRC)/%.c
-	$(CCC) $< -o $@ $(CFLAGS) $(RELEASE_DEBUG_FLAGS) $(DEP_FLAGS) $(LIBS)
+	$(CCC) $< -o $@ $(CFLAGS) $(RELEASE_DEBUG_FLAGS) $(DEP_FLAGS) $(LDFLAGS) $(LIBS)
 
 $(BIN)/%_debug: $(SRC)/%.c
-	$(CCC) $< -o $@ $(CFLAGS) $(DEBUG_FLAGS) $(DEP_FLAGS) $(LIBS)
+	$(CCC) $< -o $@ $(CFLAGS) $(DEBUG_FLAGS) $(DEP_FLAGS) $(LDFLAGS) $(LIBS)
 
 
 ###########################
 # GCC
 
 $(BIN)/%_gcc: $(SRC)/%.c
-	$(CCG) $< -o $@ $(CFLAGS) $(RELEASE_FLAGS) $(DEP_FLAGS) $(LIBS)
+	$(CCG) $< -o $@ $(CFLAGS) $(RELEASE_FLAGS) $(DEP_FLAGS) $(LDFLAGS) $(LIBS)
 
 $(BIN)/%_safe_gcc: $(SRC)/%.c
-	$(CCG) $< -o $@ $(CFLAGS) $(RELEASE_SAFE_FLAGS) $(DEP_FLAGS) $(LIBS)
+	$(CCG) $< -o $@ $(CFLAGS) $(RELEASE_SAFE_FLAGS) $(DEP_FLAGS) $(LDFLAGS) $(LIBS)
 
 $(BIN)/%_rdebug_gcc: $(SRC)/%.c
-	$(CCG) $< -o $@ $(CFLAGS) $(RELEASE_DEBUG_FLAGS) $(DEP_FLAGS) $(LIBS)
+	$(CCG) $< -o $@ $(CFLAGS) $(RELEASE_DEBUG_FLAGS) $(DEP_FLAGS) $(LDFLAGS) $(LIBS)
 
 $(BIN)/%_debug_gcc: $(SRC)/%.c
-	$(CCG) $< -o $@ $(CFLAGS) $(DEBUG_FLAGS) $(DEP_FLAGS) $(LIBS)
+	$(CCG) $< -o $@ $(CFLAGS) $(DEBUG_FLAGS) $(DEP_FLAGS) $(LDFLAGS) $(LIBS)
 
 
 ###########################
